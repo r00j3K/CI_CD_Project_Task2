@@ -1,0 +1,55 @@
+# BUILD stage
+FROM maven:3.9.6-eclipse-temurin-21-alpine AS builder
+
+# Set BUILD stage workdir to app folder
+WORKDIR /app
+
+# Copy root pom.xml file to workdir folder
+COPY pom.xml .
+
+# Copy microservice pom.xml file to corresponding image folder
+COPY appointment-service/pom.xml appointment-service/
+
+# Download dependencies as listed in appointment-service/pom.xml file before compilation of the module
+RUN mvn -f appointment-service/pom.xml dependency:go-offline -B
+
+# Copy the source code
+COPY appointment-service/src appointment-service/src
+
+# Build Appointment-service module using mvn
+RUN mvn -f appointment-service/pom.xml package -DskipTests -B
+
+# RUN stage
+FROM eclipse-temurin:21-jre-alpine AS runner
+
+# Update system packages and install curl in order to perform healthcheck
+RUN apk update && apk upgrade --no-cache && apk add curl
+
+LABEL maintainer="themarcos" \
+      description="MedApp - Appointment Service" \
+      version="1.0.0"
+
+# First one tells Java that it runs inside container
+# Second one tells Java that it can use up to 75% of assigned container memory
+ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom"
+
+# Set RUN stage workdir to app folder
+WORKDIR /app
+
+# Create both group and user without root privileges
+RUN addgroup -S medapp && adduser -S medapp -G medapp
+
+# Copy JAR file from the BUILD stage
+COPY --from=builder /app/appointment-service/target/*.jar app.jar
+
+# Change medapp file ownership to medapp
+RUN chown medapp:medapp app.jar
+
+# Switch to user medapp
+USER medapp
+
+# EXPOSE port 8082 outside the container
+EXPOSE 8082
+
+# Run app with JAVA_OPTS parameter
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

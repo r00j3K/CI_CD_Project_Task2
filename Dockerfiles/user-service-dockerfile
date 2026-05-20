@@ -1,0 +1,56 @@
+# BUILD stage
+FROM maven:3.9.6-eclipse-temurin-21 AS builder
+
+# Set BUILD stage workdir to app folder
+WORKDIR /app
+
+# Copy root pom.xml file to workdir folder
+COPY pom.xml .
+
+# Copy microservice pom.xml file to corresponding image folder
+COPY user-service/pom.xml user-service/
+
+# Download dependencies as listed in user-service/pom.xml file before compilation of the module
+RUN mvn -f user-service/pom.xml dependency:go-offline -B
+
+# Copy the source code
+COPY user-service/src user-service/src
+
+# Build User-service module using mvn
+RUN mvn -f user-service/pom.xml package -DskipTests -B
+
+# RUN stage
+FROM eclipse-temurin:21-jre-alpine AS runner
+
+# Update system packages
+RUN apk update && apk upgrade --no-cache && apk add curl
+
+LABEL maintainer="themarcos" \
+      description="MedApp - User Service" \
+      version="1.0.0"
+
+# First one tells Java that it runs inside container
+# Second one tells Java that it can use up to 75% of assigned container memory
+ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom"
+
+# Set RUN stage workdir to app folder
+WORKDIR /app
+
+# Create both group and user without root privileges
+RUN addgroup -S medapp && adduser -S medapp -G medapp
+
+# Copy JAR file from the BUILD stage
+# Scieżka musi uwzględniać podfolder modułu, w którym Maven zbudował target
+COPY --from=builder /app/user-service/target/*.jar app.jar
+
+# Change medapp file ownership to medapp
+RUN chown medapp:medapp app.jar
+
+# Switch to user medapp
+USER medapp
+
+# EXPOSE port 8081 outside the container
+EXPOSE 8081
+
+# Run app with JAVA_OPTS parameter
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
