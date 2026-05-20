@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: medapp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - user-service
+                topologyKey: "kubernetes.io/hostname"
+      containers:
+        - name: user-service
+          image: r0jek/user-service:1.0.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: medapp-config
+          env:
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: medapp-secrets
+                  key: DB_PASS
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: medapp-secrets
+                  key: JWT_SECRET
+          ports:
+            - containerPort: 8081
+          resources:
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+            requests:
+              memory: "384Mi"
+              cpu: "250m"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 40
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: medapp
+spec:
+  ports:
+    - port: 8081
+      targetPort: 8081
+  selector:
+    app: user-service
+  type: ClusterIP
